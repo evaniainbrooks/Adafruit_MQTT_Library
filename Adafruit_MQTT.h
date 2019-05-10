@@ -34,7 +34,7 @@
 #define ADAFRUIT_MQTT_VERSION_PATCH 0
 
 // Uncomment/comment to turn on/off debug output messages.
-//#define MQTT_DEBUG
+#define MQTT_DEBUG
 // Uncomment/comment to turn on/off error output messages.
 #define MQTT_ERROR
 
@@ -184,7 +184,7 @@ class Adafruit_MQTT {
   // subscription could be added or was already present, false otherwise.
   // Must be called before connect(), subscribing after the connection
   // is made is not currently supported.
-  bool subscribe(Adafruit_MQTT_Subscribe *sub);
+  bool subscribe(Adafruit_MQTT_Subscribe *sub, void (*callback)(Adafruit_MQTT_Subscribe*));
 
   // Unsubscribe from a previously subscribed MQTT topic.
   bool unsubscribe(Adafruit_MQTT_Subscribe *sub);
@@ -193,12 +193,11 @@ class Adafruit_MQTT {
   // an Adafruit_MQTT_Subscribe object which has a new message.  Should be called
   // in the sketch's loop function to ensure new messages are recevied.  Note
   // that subscribe should be called first for each topic that receives messages!
-  Adafruit_MQTT_Subscribe *readSubscription(int16_t timeout=0);
-
-  void processPackets(int16_t timeout);
+  void process(int16_t timeout=0);
 
   // Ping the server to ensure the connection is still alive.
   bool ping(uint8_t n = 1);
+  void pingAsync(void (*callback)(bool), uint8_t n = 1);
 
  protected:
   // Interface that subclasses need to implement:
@@ -237,6 +236,8 @@ class Adafruit_MQTT {
 
  private:
   Adafruit_MQTT_Subscribe *subscriptions[MAXSUBSCRIPTIONS];
+  void (*callbacks[MAXSUBSCRIPTIONS])(Adafruit_MQTT_Subscribe*);
+  void (*onPing)(bool);
 
   void    flushIncoming(uint16_t timeout);
 
