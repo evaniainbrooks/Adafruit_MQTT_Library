@@ -345,7 +345,7 @@ bool Adafruit_MQTT::will(const char *topic, const char *payload, uint8_t qos, ui
 
 }
 
-bool Adafruit_MQTT::subscribe(Adafruit_MQTT_Subscribe *sub) {
+bool Adafruit_MQTT::subscribe(Adafruit_MQTT_Subscribe *sub, void (*callback)(Adafruit_MQTT_Subscribe*)) {
   uint8_t i;
   // see if we are already subscribed
   for (i=0; i<MAXSUBSCRIPTIONS; i++) {
@@ -359,6 +359,7 @@ bool Adafruit_MQTT::subscribe(Adafruit_MQTT_Subscribe *sub) {
       if (subscriptions[i] == 0) {
         DEBUG_PRINT(F("Added sub ")); DEBUG_PRINTLN(i);
         subscriptions[i] = sub;
+	callbacks[i] = callback;
         return true;
       }
     }
@@ -400,6 +401,7 @@ bool Adafruit_MQTT::unsubscribe(Adafruit_MQTT_Subscribe *sub) {
       }
 
       subscriptions[i] = 0;
+      callbacks[i] = NULL;
       return true;
     }
 
@@ -410,56 +412,21 @@ bool Adafruit_MQTT::unsubscribe(Adafruit_MQTT_Subscribe *sub) {
 
 }
 
-void Adafruit_MQTT::processPackets(int16_t timeout) {
-
-  uint32_t elapsed = 0, endtime, starttime = millis();
-
-  while (elapsed < (uint32_t)timeout) {
-    Adafruit_MQTT_Subscribe *sub = readSubscription(timeout - elapsed);
-    if (sub) {
-      //Serial.println("**** sub packet received");
-      if (sub->callback_uint32t != NULL) {
-	// huh lets do the callback in integer mode
-	uint32_t data = 0;
-	data = atoi((char *)sub->lastread);
-	//Serial.print("*** calling int callback with : "); Serial.println(data);
-	sub->callback_uint32t(data);
-      } 
-      else if (sub->callback_double != NULL) {
-	// huh lets do the callback in doublefloat mode
-	double data = 0;
-	data = atof((char *)sub->lastread);
-	//Serial.print("*** calling double callback with : "); Serial.println(data);
-	sub->callback_double(data);
-      }
-      else if (sub->callback_buffer != NULL) {
-	// huh lets do the callback in buffer mode
-	//Serial.print("*** calling buffer callback with : "); Serial.println((char *)sub->lastread);
-	sub->callback_buffer((char *)sub->lastread, sub->datalen);
-      }
-      else if (sub->callback_io != NULL) {
-        // huh lets do the callback in io mode
-        //Serial.print("*** calling io instance callback with : "); Serial.println((char *)sub->lastread);
-        ((sub->io_mqtt)->*(sub->callback_io))((char *)sub->lastread, sub->datalen);
-      }
-    }
-
-    // keep track over elapsed time
-    endtime = millis();
-    if (endtime < starttime) {
-      starttime = endtime; // looped around!")
-    }
-    elapsed += (endtime - starttime);
-  }
-}
-
-Adafruit_MQTT_Subscribe *Adafruit_MQTT::readSubscription(int16_t timeout) {
+void Adafruit_MQTT::process(int16_t timeout) {
   uint16_t i, topiclen, datalen;
 
   // Check if data is available to read.
   uint16_t len = readFullPacket(buffer, MAXBUFFERSIZE, timeout); // return one full packet
+
   if (!len)
-    return NULL;  // No data available, just quit.
+    return;  // No data available, just quit.
+
+   //len = processPacketsUntil(buffer, MQTT_CTRL_PINGRESP, PING_TIMEOUT_MS);
+  while (buffer[0] == (MQTT_CTRL_PINGRESP << 4) && len > 0) {
+    this->onPing(true);
+    len = readFullPacket(buffer, MAXBUFFERSIZE, timeout); // return one full packet
+  }
+
   DEBUG_PRINT("Packet len: "); DEBUG_PRINTLN(len); 
   DEBUG_PRINTBUFFER(buffer, len);
 
@@ -520,13 +487,32 @@ Adafruit_MQTT_Subscribe *Adafruit_MQTT::readSubscription(int16_t timeout) {
   }
 
   // return the valid matching subscription
-  return subscriptions[i];
+  callbacks[i](subscriptions[i]);
 }
 
 void Adafruit_MQTT::flushIncoming(uint16_t timeout) {
   // flush input!
   DEBUG_PRINTLN(F("Flushing input buffer"));
   while (readPacket(buffer, MAXBUFFERSIZE, timeout));
+}
+
+void Adafruit_MQTT::pingAsync(void (*callback)(bool), uint8_t num) {
+  this->onPing = callback;
+  //flushIncoming(100);
+
+  while (num--) {
+    // Construct and send ping packet.
+    uint8_t len = pingPacket(buffer);
+    if (sendPacket(buffer, len))
+      return;
+
+    // Process ping reply.
+    //len = processPacketsUntil(buffer, MQTT_CTRL_PINGRESP, PING_TIMEOUT_MS);
+    //if (buffer[0] == (MQTT_CTRL_PINGRESP << 4))
+    //  return;
+  }
+
+  //return false;
 }
 
 bool Adafruit_MQTT::ping(uint8_t num) {
